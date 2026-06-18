@@ -26,11 +26,10 @@ def get_ai_news():
         print(f"Network error while fetching news: {e}")
         return []
 
-# 2. THINK: Ask Gemini to summarize
+# 2. THINK: Ask Gemini to summarize with prioritized model logic
 def generate_summary(titles):
     client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
     
-    # We use a very strict prompt
     prompt = f"""
     You are a professional tech social media curator.
     Headlines to cover: {titles}.
@@ -42,26 +41,37 @@ def generate_summary(titles):
     4. NO INTRO, NO OUTRO, NO filler phrases like "Here is a post".
     """
     
-    model_list = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
+    # Priority: Stick with the best model, use others as emergency fallbacks
+    model_priority = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
     
-    for model in model_list:
-        try:
-            response = client.models.generate_content(model=model, contents=prompt)
-            
-            # --- The Zero-Tolerance Filter ---
-            forbidden = ["here is", "sure", "i have", "the post", "viral-style", "catchy", "social media", "hello"]
-            clean_lines = [
-                line for line in response.text.split('\n')
-                if not any(f in line.lower() for f in forbidden) and line.strip() != ""
-            ]
-            
-            return "\n".join(clean_lines).strip()
-            
-        except Exception as e:
-            print(f"Model {model} failed: {e}")
-            continue
+    for model in model_priority:
+        max_retries = 5 
+        wait_time = 5 
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"Trying {model} (Attempt {attempt + 1}/{max_retries})...")
+                response = client.models.generate_content(model=model, contents=prompt)
                 
-    raise Exception("All models exhausted.")
+                # --- The Zero-Tolerance Filter ---
+                forbidden = ["here is", "sure", "i have", "the post", "viral-style", "catchy", "social media", "hello"]
+                clean_lines = [
+                    line for line in response.text.split('\n')
+                    if not any(f in line.lower() for f in forbidden) and line.strip() != ""
+                ]
+                
+                return "\n".join(clean_lines).strip()
+            
+            except errors.ServerError:
+                wait_time *= 2 # Exponential backoff
+                print(f"Model busy, backing off for {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+            except Exception as e:
+                print(f"Unexpected error with {model}: {e}")
+                break
+                
+    raise Exception("Critical: All models exhausted.")
 
 # 3. RUN: Execution logic
 def main():
