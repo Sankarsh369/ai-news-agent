@@ -4,109 +4,79 @@ import time
 from google.genai import errors
 from google import genai
 from dotenv import load_dotenv
-import sender  # Imports send_telegram and send_discord
+import sender 
 
 load_dotenv()
 
-# 1. FETCH: Get the news
+# 1. FETCH: Get the news with Links
 def get_ai_news():
     api_key = os.getenv('NEWS_API_KEY')
     url = f"https://newsapi.org/v2/everything?q=artificial-intelligence&sortBy=publishedAt&apiKey={api_key}"
     
     try:
         response = requests.get(url, timeout=10).json()
-        
-        # 1. Check for API errors
         if response.get('status') != 'ok':
             print(f"Error fetching news: {response.get('message')}")
             return []
             
-        # 2. Extract articles with error handling
         articles = response.get('articles', [])[:3]
-        if not articles:
-            return []
-            
-        # 3. Format with titles AND links
         return [f"{a['title']} - Read more: {a['url']}" for a in articles]
         
     except Exception as e:
         print(f"Network error while fetching news: {e}")
         return []
-    
+
 # 2. THINK: Ask Gemini to summarize
 def generate_summary(titles):
     client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
     
-    # The strictly formatted prompt
+    # We use a very strict prompt
     prompt = f"""
-    You are an expert social media curator. 
-    Take these headlines: {titles}.
-
-    Write a high-engagement post.
-    STRICT FORMATTING RULES:
-    - START IMMEDIATELY with the Hook. DO NOT include "Here is", "Sure", or any introductory filler.
-    - Hook: One punchy, provocative sentence.
-    - Body: Exactly 3 bullet points. Max 15 words per bullet. Use emojis at the start of each bullet.
-    - Ending: One short, engaging question.
-    - Style: Use human, conversational language. NO 'AI-speak'.
+    You are a professional tech social media curator.
+    Headlines to cover: {titles}.
+    
+    STRICT RULES:
+    1. Hook: Start immediately with one punchy, provocative sentence.
+    2. Body: Exactly 3 bullet points. Each bullet must be concise (max 15 words) and include the link provided.
+    3. Ending: One short, engaging question to drive comments.
+    4. NO INTRO, NO OUTRO, NO filler phrases like "Here is a post".
     """
     
     model_list = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
     
     for model in model_list:
-        max_retries = 3
-        wait_time = 2 
-        
-        for attempt in range(max_retries):
-            try:
-                print(f"Trying model: {model} (Attempt {attempt + 1})...")
-                response = client.models.generate_content(
-                    model=model,
-                    contents=prompt
-                )
-                
-                # --- The Final Filter ---
-                # This ensures no "Here is your post" or bot-talk makes it through
-                raw_text = response.text
-                lines = raw_text.split('\n')
-                
-                # Filter out lines that look like AI introductions
-                forbidden = ["here is", "sure", "i have", "the post", "viral-style", "catchy"]
-                clean_lines = [
-                    line for line in lines 
-                    if not any(f in line.lower() for f in forbidden)
-                ]
-                
-                return "\n".join(clean_lines).strip()
+        try:
+            response = client.models.generate_content(model=model, contents=prompt)
             
-            except errors.ServerError:
-                wait_time *= 2 
-                print(f"Model {model} busy, waiting {wait_time}s...")
-                time.sleep(wait_time)
-                continue 
-            except Exception as e:
-                print(f"Unexpected error with {model}: {e}")
-                break 
+            # --- The Zero-Tolerance Filter ---
+            forbidden = ["here is", "sure", "i have", "the post", "viral-style", "catchy", "social media", "hello"]
+            clean_lines = [
+                line for line in response.text.split('\n')
+                if not any(f in line.lower() for f in forbidden) and line.strip() != ""
+            ]
+            
+            return "\n".join(clean_lines).strip()
+            
+        except Exception as e:
+            print(f"Model {model} failed: {e}")
+            continue
                 
-    raise Exception("All models exhausted after multiple retries.")
-           
-# 3. RUN: Put it all together
+    raise Exception("All models exhausted.")
+
+# 3. RUN: Execution logic
 def main():
-    print("Fetching news automatically...")
-    news_titles = get_ai_news() 
-    
+    print("Fetching news...")
+    news_titles = get_ai_news()
     if not news_titles:
-        print("No news found today.")
         return
 
     print("Generating post...")
     post_text = generate_summary(news_titles)
     
     print("Posting to social media...")
-    # Using sender. to access the functions from your sender.py file
     sender.send_telegram(post_text) 
     sender.send_discord(post_text)
-    print("Done!")
+    print("Success!")
     
 if __name__ == "__main__":
     main()
