@@ -10,26 +10,47 @@ load_dotenv()
 
 # 1. FETCH: Get the news
 def get_ai_news():
-    # Load key from .env, NOT hardcoded
     api_key = os.getenv('NEWS_API_KEY')
-    url = f"https://newsapi.org/v2/everything?q=artificial-intelligence&apiKey={api_key}"
-    response = requests.get(url).json()
+    url = f"https://newsapi.org/v2/everything?q=artificial-intelligence&sortBy=publishedAt&apiKey={api_key}"
     
-    # Check if API returned an error
-    if response.get('status') != 'ok':
-        print(f"Error fetching news: {response.get('message')}")
-        return []
+    try:
+        response = requests.get(url, timeout=10).json()
         
-    articles = response.get('articles', [])[:5]
-    return [a['title'] for a in articles]
-
+        # 1. Check for API errors
+        if response.get('status') != 'ok':
+            print(f"Error fetching news: {response.get('message')}")
+            return []
+            
+        # 2. Extract articles with error handling
+        articles = response.get('articles', [])[:3]
+        if not articles:
+            return []
+            
+        # 3. Format with titles AND links
+        return [f"{a['title']} - Read more: {a['url']}" for a in articles]
+        
+    except Exception as e:
+        print(f"Network error while fetching news: {e}")
+        return []
+    
 # 2. THINK: Ask Gemini to summarize
 def generate_summary(titles):
-    client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
-    prompt = f"Read these AI news headlines and write one catchy, viral-style social media post: {titles}"
-    
+    client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))    
+    # We now strictly define the Output Format
+    prompt = f"""
+    You are an expert social media curator. 
+    Take these headlines: {titles}.
+
+    Write a high-engagement post.
+    STRICT FORMATTING RULES:
+    - START IMMEDIATELY with the Hook. DO NOT include "Here is a post", "Sure", or any introductory filler.
+    - Hook: One punchy, provocative sentence.
+    - Body: Exactly 3 bullet points. Max 15 words per bullet. Use emojis at the start of each bullet.
+    - Ending: One short, engaging question.
+    - Style: No 'AI-speak' like 'we have entered the era'. Use human, conversational language.
+    """
     model_list = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
-    
+        
     for model in model_list:
         max_retries = 3
         wait_time = 2 
