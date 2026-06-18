@@ -35,22 +35,24 @@ def get_ai_news():
     
 # 2. THINK: Ask Gemini to summarize
 def generate_summary(titles):
-    client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))    
-    # We now strictly define the Output Format
+    client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+    
+    # The strictly formatted prompt
     prompt = f"""
     You are an expert social media curator. 
     Take these headlines: {titles}.
 
     Write a high-engagement post.
     STRICT FORMATTING RULES:
-    - START IMMEDIATELY with the Hook. DO NOT include "Here is a post", "Sure", or any introductory filler.
+    - START IMMEDIATELY with the Hook. DO NOT include "Here is", "Sure", or any introductory filler.
     - Hook: One punchy, provocative sentence.
     - Body: Exactly 3 bullet points. Max 15 words per bullet. Use emojis at the start of each bullet.
     - Ending: One short, engaging question.
-    - Style: No 'AI-speak' like 'we have entered the era'. Use human, conversational language.
+    - Style: Use human, conversational language. NO 'AI-speak'.
     """
+    
     model_list = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
-        
+    
     for model in model_list:
         max_retries = 3
         wait_time = 2 
@@ -62,7 +64,20 @@ def generate_summary(titles):
                     model=model,
                     contents=prompt
                 )
-                return response.text 
+                
+                # --- The Final Filter ---
+                # This ensures no "Here is your post" or bot-talk makes it through
+                raw_text = response.text
+                lines = raw_text.split('\n')
+                
+                # Filter out lines that look like AI introductions
+                forbidden = ["here is", "sure", "i have", "the post", "viral-style", "catchy"]
+                clean_lines = [
+                    line for line in lines 
+                    if not any(f in line.lower() for f in forbidden)
+                ]
+                
+                return "\n".join(clean_lines).strip()
             
             except errors.ServerError:
                 wait_time *= 2 
@@ -74,7 +89,7 @@ def generate_summary(titles):
                 break 
                 
     raise Exception("All models exhausted after multiple retries.")
-            
+           
 # 3. RUN: Put it all together
 def main():
     print("Fetching news automatically...")
